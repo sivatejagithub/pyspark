@@ -1,0 +1,133 @@
+Perfect, let’s break this down step by step so you can see what’s happening in your Databricks notebook and how PySpark fits in. Think of this script as a pipeline: it connects to Azure storage, reads raw CSV data, transforms it, and saves it back in a clean format.
+
+---
+
+## 🔑 Step 1: Configuration and Secrets
+```python
+aldsAccountName="formula1project2023"
+adlsContainerName="raw"
+mountPoint="/mnt/Files/formula1/raw/"
+```
+- You define your **Azure Data Lake Storage (ADLS)** account and container.
+- `mountPoint` is the folder inside Databricks where you’ll access the files.
+
+```python
+clientSecret=dbutils.secrets.get(scope="formula1project", key="clientsecret")
+appId=dbutils.secrets.get(scope="formula1project",key="appId")
+tenantId=dbutils.secrets.get(scope="formula1project",key="tenantId")
+```
+- These lines securely fetch credentials (App ID, Secret, Tenant ID) from **Databricks Secrets** so you don’t hardcode sensitive info.
+
+---
+
+## 🔑 Step 2: Mounting ADLS to Databricks
+```python
+configs = {
+   "fs.azure.account.auth.type": "OAuth",
+   "fs.azure.account.oauth.provider.type": "org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider",
+   "fs.azure.account.oauth2.client.id": appId,
+   "fs.azure.account.oauth2.client.secret": clientSecret,
+   "fs.azure.account.oauth2.client.endpoint": "https://login.microsoftonline.com/<tenant-id>/oauth2/token",
+   "fs.azure.createRemoteFileSystemDuringInitialization": "true"
+}
+```
+- This config tells Spark how to authenticate with ADLS using OAuth.
+
+```python
+dbutils.fs.mount(
+   source = "abfss://raw@formula1project2023.dfs.core.windows.net/raw",
+   mount_point = mountPoint,
+   extra_configs = configs)
+```
+- This mounts your ADLS container into Databricks so you can treat it like a local folder (`/mnt/...`).
+
+---
+
+## 📂 Step 3: Reading Data
+```python
+df_circuits = spark.read.option('header', True)\
+                        .option('interferSchema', True)\
+                        .csv("dbfs:/mnt/Files/formula1/raw/circuits.csv")
+```
+- Reads the CSV file into a Spark DataFrame.
+- `header=True` means the first row contains column names.
+- `inferSchema=True` (typo in your code: you wrote `interferSchema`) automatically detects column types.
+
+---
+
+## 🏗 Step 4: Defining Schema
+```python
+circuits_schema = StructType([
+   StructField("circuitId", IntegerType(), False),
+   StructField("circuitRef", StringType(), True),
+   ...
+])
+```
+- Instead of relying on Spark to guess, you explicitly define the schema (column names + data types).
+- This ensures consistency and avoids errors.
+
+```python
+df_circuits_final = spark.read\
+   .option('header', True)\
+   .schema(circuits_schema)\
+   .csv("dbfs:/mnt/Files/formula1/raw/circuits.csv")
+```
+- Reads the CSV again, but now using your schema.
+
+---
+
+## ✂️ Step 5: Selecting and Renaming Columns
+```python
+circuits_selected_df = df_circuits_final.select("circuitId","circuitRef","name","location","country","lat","lng","alt")
+```
+- Keeps only the columns you care about.
+
+```python
+circuits_renamed_df = circuits_selected_df.withColumnRenamed("circuitId", "circuit_id")\
+   .withColumnRenamed("circuitRef", "circuit_ref")\
+   .withColumnRenamed("lat", "latitude")\
+   .withColumnRenamed("lng", "longitude")\
+   .withColumnRenamed("alt", "altitude")
+```
+- Renames columns to more readable names.
+
+---
+
+## ⏱ Step 6: Add Metadata
+```python
+circuits_final_df = circuits_renamed_df.withColumn("ingestion_date", current_timestamp())
+```
+- Adds a new column with the current timestamp (when the data was ingested).
+
+---
+
+## 💾 Step 7: Save Processed Data
+```python
+circuits_final_df.write.mode("overwrite").parquet("/mnt/formula1/processed/circuits")
+```
+- Saves the cleaned DataFrame in **Parquet format** (efficient, columnar storage).
+- `overwrite` replaces old data if it exists.
+
+---
+
+## 🎯 Big Picture
+1. **Mount ADLS** → Connect Databricks to Azure storage.
+2. **Read raw CSV** → Load data into Spark.
+3. **Define schema** → Ensure correct data types.
+4. **Transform data** → Select, rename, add timestamp.
+5. **Save processed data** → Store clean data in Parquet for analytics.
+
+Note:
+🔹 ABFSS
+- Stands for: Azure Blob File System Secure.
+- Usage: It’s the protocol you use to directly access files stored in Azure Data Lake Storage Gen2.
+- Format:  abfss://<container>@<storageaccount>.dfs.core.windows.net/<path>
+- Security: Uses OAuth and secure authentication (like service principals).
+- When to use: Anytime you want Spark to read/write directly from Azure storage without mounting.
+🔹 DBFS
+- Stands for: Databricks File System.
+- Usage: It’s a virtual file system layer inside Databricks. Think of it as a wrapper that lets you access cloud storage as if it were local.
+- Format:  dbfs:/mnt/<mount-name>/<path>
+- How it works: You mount external storage (like ADLS or S3) into DBFS. After mounting, you can use simple paths (/mnt/...) instead of the long abfss://... URLs.
+- When to use: For convenience — once mounted, you can treat external storage like a local folder in Databricks.
+
