@@ -1,4 +1,6 @@
-Perfect, let’s break this down step by step so you can see what’s happening in your Databricks notebook and how PySpark fits in. Think of this script as a pipeline: it connects to Azure storage, reads raw CSV data, transforms it, and saves it back in a clean format.
+Source : https://github.com/JANHMS/Advanced-ETL-Azure-Databricks-Pyspark/blob/main/1.Ingest-basic/1%20-%20Ingest%20circuits%20data.py
+Perfect, let’s break this down step by step so you can see what’s happening in your Databricks notebook and how PySpark fits in.
+Think of this script as a pipeline: it connects to Azure storage, reads raw CSV data, transforms it, and saves it back in a clean format.
 
 ---
 
